@@ -79,6 +79,8 @@ export class HiAnimeScraper {
     const type =
       $el.find(".fd-infor .fdi-item").first().text().trim() || "TV";
     const duration = $el.find(".fdi-duration").text().trim() || undefined;
+    const rating =
+      $el.find(".tick-pg, .tick-rate").text().trim() || undefined;
 
     return {
       id,
@@ -87,6 +89,7 @@ export class HiAnimeScraper {
       poster,
       duration,
       type,
+      rating,
       episodes: { sub, dub, eps },
     };
   }
@@ -414,6 +417,15 @@ export class HiAnimeScraper {
     const dub = parseInt($(".tick-dub").first().text().trim(), 10) || 0;
     const eps = parseInt($(".tick-eps").first().text().trim(), 10) || 0;
 
+    const ageRating =
+      $(".film-stats .tick-pg, .tick-pg").first().text().trim() || undefined;
+    const quality =
+      $(".film-stats .tick-quality, .tick-quality, .quality")
+        .first()
+        .text()
+        .trim() || "HD";
+    const malScore = info["MAL Score"] || undefined;
+
     return {
       anime: {
         info: {
@@ -422,11 +434,13 @@ export class HiAnimeScraper {
           poster,
           description,
           stats: {
-            rating: info["MAL Score"] || undefined,
-            quality: $(".quality").first().text().trim() || "HD",
+            rating: ageRating,
+            quality,
             episodes: { sub, dub, eps },
-            type: info["Type"] || "TV",
+            type: info["Type"] || $(".film-stats .item").first().text().trim() || "TV",
             duration: info["Duration"] || undefined,
+            score: malScore,
+            malScore,
           },
           promotionalVideos: [],
           charactersAndVoiceActors: [],
@@ -439,6 +453,8 @@ export class HiAnimeScraper {
           duration: info["Duration"],
           status: info["Status"],
           malScore: info["MAL Score"],
+          score: info["MAL Score"],
+          rating: ageRating,
           genres: info["Genres"]
             ? info["Genres"].split(",").map((g: string) => g.trim())
             : [],
