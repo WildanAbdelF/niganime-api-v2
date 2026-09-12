@@ -46,6 +46,18 @@ export interface AnimeCard {
   };
 }
 
+export interface SkipInterval {
+  start: number;
+  end: number;
+}
+
+export interface SubtitleTrack {
+  file: string;
+  label: string;
+  kind: string;
+  default?: boolean;
+}
+
 export class HiAnimeScraper {
   private client: AxiosInstance;
 
@@ -573,6 +585,66 @@ export class HiAnimeScraper {
   }
 
   /**
+   * Helper to extract intro & outro skip intervals + subtitle tracks from Megaplay.
+   */
+  async getMegaplaySources(streamIdOrUrl: string) {
+    try {
+      let streamId = streamIdOrUrl;
+      const match = streamIdOrUrl.match(/\/stream\/s-\d+\/([^\/?#]+)/i);
+      if (match) {
+        streamId = match[1];
+      }
+      if (!streamId) return null;
+
+      const { data } = await axios.get(
+        `https://megaplay.buzz/stream/getSources?id=${streamId}`,
+        {
+          headers: {
+            "User-Agent": DEFAULT_HEADERS["User-Agent"],
+            Referer: `https://megaplay.buzz/stream/s-2/${streamId}/sub`,
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          timeout: 10000,
+        }
+      );
+
+      const parseInterval = (val: any): SkipInterval => {
+        if (!val) return { start: 0, end: 0 };
+        if (Array.isArray(val)) {
+          return {
+            start: Number(val[0]) || 0,
+            end: Number(val[1]) || 0,
+          };
+        }
+        if (typeof val === "object") {
+          return {
+            start: Number(val.start) || 0,
+            end: Number(val.end) || 0,
+          };
+        }
+        return { start: 0, end: 0 };
+      };
+
+      const tracks: SubtitleTrack[] = Array.isArray(data?.tracks)
+        ? data.tracks.map((t: any) => ({
+            file: t.file || "",
+            label: t.label || "",
+            kind: t.kind || "captions",
+            default: Boolean(t.default),
+          }))
+        : [];
+
+      return {
+        intro: parseInterval(data?.intro),
+        outro: parseInterval(data?.outro),
+        tracks,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * GET /api/episode/sources?id=...&server=...&category=...
    */
   async getEpisodeSources(
@@ -593,6 +665,29 @@ export class HiAnimeScraper {
 
     const embedUrl = selected?.url || "";
 
+    // Locate Megaplay stream URL for dynamic skip timestamps and subtitle tracks
+    let megaplayUrl = embedUrl.includes("megaplay.buzz") ? embedUrl : "";
+    if (!megaplayUrl) {
+      const megaServer =
+        targetList.find((s) => s.url?.includes("megaplay.buzz")) ||
+        serversData.sub.find((s) => s.url?.includes("megaplay.buzz")) ||
+        serversData.dub.find((s) => s.url?.includes("megaplay.buzz"));
+      if (megaServer) megaplayUrl = megaServer.url;
+    }
+
+    let intro: SkipInterval = { start: 0, end: 0 };
+    let outro: SkipInterval = { start: 0, end: 0 };
+    let tracks: SubtitleTrack[] = [];
+
+    if (megaplayUrl) {
+      const megaData = await this.getMegaplaySources(megaplayUrl);
+      if (megaData) {
+        intro = megaData.intro;
+        outro = megaData.outro;
+        tracks = megaData.tracks;
+      }
+    }
+
     return {
       headers: {
         Referer: "https://megaplay.buzz/",
@@ -605,8 +700,38 @@ export class HiAnimeScraper {
         },
       ],
       embedUrl,
+      intro,
+      outro,
+      tracks,
       server: selected?.serverName || server,
       type: category,
+    };
+  }
+
+  /**
+   * GET /api/episode/skip?id=...
+   * Dynamically retrieves skip opening and skip ending intervals for an episode.
+   */
+  async getEpisodeSkipTimes(episodeId: string) {
+    const serversData = await this.getEpisodeServers(episodeId);
+    const allServers = [...serversData.sub, ...serversData.dub];
+    const megaServer = allServers.find((s) => s.url?.includes("megaplay.buzz"));
+
+    let intro: SkipInterval = { start: 0, end: 0 };
+    let outro: SkipInterval = { start: 0, end: 0 };
+
+    if (megaServer?.url) {
+      const megaData = await this.getMegaplaySources(megaServer.url);
+      if (megaData) {
+        intro = megaData.intro;
+        outro = megaData.outro;
+      }
+    }
+
+    return {
+      episodeId,
+      intro,
+      outro,
     };
   }
 

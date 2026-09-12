@@ -7,9 +7,9 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/episode/sources?id={episodeId}&server={server}&category={sub|dub|raw}
  *
- * Get streaming source URLs (HLS .m3u8) for an episode.
+ * Get streaming source URLs, intro/outro skip times, and subtitle tracks for an episode.
  *
- * @param id - Episode ID (e.g. "steinsgate-3?ep=230")
+ * @param id - Episode ID (e.g. "steinsgate-3?ep=230" or "230")
  * @param server - Server name: "hd-1", "hd-2", "megacloud", "streamsb", "streamtape", "vidstreaming" (default: "hd-1")
  * @param category - "sub", "dub", or "raw" (default: "sub")
  */

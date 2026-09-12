@@ -13,6 +13,7 @@ export async function GET() {
       episode_servers: "/api/episode/servers?id={episodeId}",
       episode_sources:
         "/api/episode/sources?id={episodeId}&server={server}&category={sub|dub|raw}",
+      episode_skip: "/api/episode/skip?id={episodeId}",
       genre: "/api/genre/{genreName}?page={page}",
       category: "/api/category/{categoryName}?page={page}",
       producer: "/api/producer/{producerName}?page={page}",
