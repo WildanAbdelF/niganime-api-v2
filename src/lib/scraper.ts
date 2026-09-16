@@ -576,11 +576,36 @@ export class HiAnimeScraper {
       });
     }
 
+    const isAdServer = (name: string, url: string) => {
+      const lowerName = name.toLowerCase();
+      const lowerUrl = (url || "").toLowerCase();
+      return lowerName.includes("zoko") || lowerUrl.includes("zokoanime");
+    };
+
+    const sortServers = (list: any[]) => {
+      return [...list]
+        .sort((a, b) => {
+          const aIsAd = isAdServer(a.serverName, a.url);
+          const bIsAd = isAdServer(b.serverName, b.url);
+          if (aIsAd && !bIsAd) return 1;
+          if (!aIsAd && bIsAd) return -1;
+          const aIsHd = a.serverName.toLowerCase().replace(/[^a-z0-9]/g, "").startsWith("hd");
+          const bIsHd = b.serverName.toLowerCase().replace(/[^a-z0-9]/g, "").startsWith("hd");
+          if (aIsHd && !bIsHd) return -1;
+          if (!aIsHd && bIsHd) return 1;
+          return 0;
+        })
+        .map((item, idx) => ({
+          ...item,
+          serverId: idx + 1,
+        }));
+    };
+
     return {
       episodeId,
       episodeNo: 1,
-      sub,
-      dub,
+      sub: sortServers(sub),
+      dub: sortServers(dub),
     };
   }
 
@@ -596,12 +621,17 @@ export class HiAnimeScraper {
       }
       if (!streamId) return null;
 
+      const sParamMatch = streamIdOrUrl.match(/[?&]s=([a-z0-9_-]+)/i);
+      const sQuery = sParamMatch ? `&s=${encodeURIComponent(sParamMatch[1])}` : "";
+
       const { data } = await axios.get(
-        `https://megaplay.buzz/stream/getSources?id=${streamId}`,
+        `https://megaplay.buzz/stream/getSources?id=${streamId}${sQuery}`,
         {
           headers: {
             "User-Agent": DEFAULT_HEADERS["User-Agent"],
-            Referer: `https://megaplay.buzz/stream/s-2/${streamId}/sub`,
+            Referer: streamIdOrUrl.includes("http")
+              ? streamIdOrUrl
+              : `https://megaplay.buzz/stream/s-2/${streamId}/sub`,
             "X-Requested-With": "XMLHttpRequest",
           },
           timeout: 10000,
@@ -655,12 +685,30 @@ export class HiAnimeScraper {
     const serversData = await this.getEpisodeServers(episodeId);
     const targetList = category === "dub" ? serversData.dub : serversData.sub;
 
-    let selected = targetList[0];
-    if (server) {
-      const found = targetList.find((s) =>
-        s.serverName.toLowerCase().includes(server.toLowerCase().replace("-", ""))
+    const normalize = (name: string) =>
+      name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const targetServer = normalize(server);
+
+    let selected = targetList.find((s) => {
+      const serverNorm = normalize(s.serverName);
+      return (
+        serverNorm === targetServer ||
+        serverNorm.includes(targetServer) ||
+        targetServer.includes(serverNorm)
       );
-      if (found) selected = found;
+    });
+
+    if (
+      !selected ||
+      selected.serverName.toLowerCase().includes("zoko") ||
+      selected.url?.includes("zokoanime")
+    ) {
+      selected =
+        targetList.find((s) => normalize(s.serverName).includes("hd1")) ||
+        targetList.find((s) => normalize(s.serverName).includes("hd2")) ||
+        targetList.find((s) => s.url?.includes("megaplay.buzz")) ||
+        targetList.find((s) => !s.serverName.toLowerCase().includes("zoko")) ||
+        targetList[0];
     }
 
     const embedUrl = selected?.url || "";
