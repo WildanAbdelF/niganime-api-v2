@@ -87,6 +87,7 @@ export interface SubtitleTrack {
   label: string;
   kind: string;
   default?: boolean;
+  rawFile?: string;
 }
 
 export class HiAnimeScraper {
@@ -655,6 +656,56 @@ export class HiAnimeScraper {
   }
 
   /**
+   * Helper to extract MAL ID and episode number from servers list (e.g. ZokoAnime server URL)
+   */
+  extractMalInfo(serversData: { sub: any[]; dub: any[] }): { malId: string; episodeNo: string } | null {
+    const allServers = [...(serversData?.sub || []), ...(serversData?.dub || [])];
+    for (const s of allServers) {
+      const match = s.url?.match(/\/mal\/(\d+)\/(\d+)/);
+      if (match) {
+        return { malId: match[1], episodeNo: match[2] };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Helper to fetch opening & ending skip timestamps from AniSkip using MAL ID & episode number
+   */
+  async getAniSkipTimes(
+    malId: string | number,
+    episodeNo: string | number
+  ): Promise<{ intro: SkipInterval; outro: SkipInterval } | null> {
+    try {
+      const res = await axios.get(
+        `https://api.aniskip.com/v2/skip-times/${malId}/${episodeNo}?types=op&types=ed&episodeLength=0`,
+        { timeout: 5000 }
+      );
+      if (res.data?.found && Array.isArray(res.data?.results)) {
+        let intro: SkipInterval = { start: 0, end: 0 };
+        let outro: SkipInterval = { start: 0, end: 0 };
+        for (const item of res.data.results) {
+          if (item.skipType === "op" && item.interval) {
+            intro = {
+              start: Math.round(item.interval.startTime) || 0,
+              end: Math.round(item.interval.endTime) || 0,
+            };
+          } else if (item.skipType === "ed" && item.interval) {
+            outro = {
+              start: Math.round(item.interval.startTime) || 0,
+              end: Math.round(item.interval.endTime) || 0,
+            };
+          }
+        }
+        return { intro, outro };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Helper to extract intro & outro skip intervals + subtitle tracks from Megaplay.
    * Resolves the real internal file data-id from the player HTML to guarantee the exact correct anime episode.
    */
@@ -828,6 +879,22 @@ export class HiAnimeScraper {
       }
     }
 
+    // If Megaplay has missing skip times, fallback to AniSkip
+    if (intro.end === 0 || outro.end === 0) {
+      const malInfo = this.extractMalInfo(serversData);
+      if (malInfo) {
+        const aniSkip = await this.getAniSkipTimes(malInfo.malId, malInfo.episodeNo);
+        if (aniSkip) {
+          if (intro.end === 0 && aniSkip.intro.end > 0) {
+            intro = aniSkip.intro;
+          }
+          if (outro.end === 0 && aniSkip.outro.end > 0) {
+            outro = aniSkip.outro;
+          }
+        }
+      }
+    }
+
     const sources: Array<{
       url: string;
       type: string;
@@ -874,7 +941,13 @@ export class HiAnimeScraper {
       embedUrl,
       intro,
       outro,
-      tracks,
+      tracks: tracks.map((t) => ({
+        ...t,
+        file: t.file
+          ? `/api/proxy/subtitle?url=${encodeURIComponent(t.file)}`
+          : t.file,
+        rawFile: t.file,
+      })),
       server: selected?.serverName || server,
       type: category,
     };
@@ -897,6 +970,22 @@ export class HiAnimeScraper {
       if (megaData) {
         intro = megaData.intro;
         outro = megaData.outro;
+      }
+    }
+
+    // Fallback to AniSkip if Megaplay has missing skip times
+    if (intro.end === 0 || outro.end === 0) {
+      const malInfo = this.extractMalInfo(serversData);
+      if (malInfo) {
+        const aniSkip = await this.getAniSkipTimes(malInfo.malId, malInfo.episodeNo);
+        if (aniSkip) {
+          if (intro.end === 0 && aniSkip.intro.end > 0) {
+            intro = aniSkip.intro;
+          }
+          if (outro.end === 0 && aniSkip.outro.end > 0) {
+            outro = aniSkip.outro;
+          }
+        }
       }
     }
 

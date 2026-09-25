@@ -16,6 +16,7 @@ export async function GET() {
       episode_skip: "/api/episode/skip?id={episodeId}",
       proxy_m3u8: "/api/proxy/m3u8?url={m3u8Url}&clean={true|false}",
       proxy_segment: "/api/proxy/segment?url={segmentUrl}",
+      proxy_subtitle: "/api/proxy/subtitle?url={subtitleUrl}",
       genre: "/api/genre/{genreName}?page={page}",
       category: "/api/category/{categoryName}?page={page}",
       producer: "/api/producer/{producerName}?page={page}",

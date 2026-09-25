@@ -56,12 +56,19 @@ export async function GET(request: NextRequest) {
       category as "sub" | "dub" | "raw"
     );
 
-    // Ensure proxy sources have full absolute URLs so client video players can fetch directly
+    // Ensure proxy sources and subtitle tracks have full absolute URLs so client video players can fetch directly
     const origin = request.nextUrl.origin;
     if (data.sources) {
       data.sources = data.sources.map((s: any) => ({
         ...s,
         url: s.url.startsWith("/") ? `${origin}${s.url}` : s.url,
+      }));
+    }
+
+    if (data.tracks) {
+      data.tracks = data.tracks.map((t: any) => ({
+        ...t,
+        file: t.file.startsWith("/") ? `${origin}${t.file}` : t.file,
       }));
     }
 

@@ -67,6 +67,11 @@ export async function GET(request: NextRequest) {
                     resolvedUri
                   )}&clean=${clean}"`;
                 }
+                if (resolvedUri.includes(".vtt") || resolvedUri.includes(".srt")) {
+                  return `URI="${origin}/api/proxy/subtitle?url=${encodeURIComponent(
+                    resolvedUri
+                  )}"`;
+                }
                 if (clean) {
                   return `URI="${origin}/api/proxy/segment?url=${encodeURIComponent(
                     resolvedUri
@@ -83,7 +88,7 @@ export async function GET(request: NextRequest) {
           rewrittenLines.push(line);
         }
       } else {
-        // Line is a URL / relative link (sub-playlist or video segment)
+        // Line is a URL / relative link (sub-playlist, video segment, or subtitle)
         try {
           const resolved = new URL(trimmed, targetUrl).href;
           if (resolved.includes(".m3u8")) {
@@ -91,6 +96,10 @@ export async function GET(request: NextRequest) {
               `${origin}/api/proxy/m3u8?url=${encodeURIComponent(
                 resolved
               )}&clean=${clean}`
+            );
+          } else if (resolved.includes(".vtt") || resolved.includes(".srt")) {
+            rewrittenLines.push(
+              `${origin}/api/proxy/subtitle?url=${encodeURIComponent(resolved)}`
             );
           } else {
             // Media segment URL
