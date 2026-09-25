@@ -544,7 +544,8 @@ export class HiAnimeScraper {
 
         episodes.push({
           id: `${id}?ep=${epId}`,
-          episodeId: epId,
+          episodeId: `${id}?ep=${epId}`,
+          epId,
           number,
           title,
           isFiller,
@@ -562,9 +563,22 @@ export class HiAnimeScraper {
    * GET /api/episode/servers?id=...
    */
   async getEpisodeServers(episodeId: string) {
-    // episodeId might be "one-piece-1?ep=1" or just "1"
+    // episodeId might be "erased-1030?ep=17306", "17306", or just "erased-1030"
+    let id = episodeId;
     const epIdMatch = episodeId.match(/ep=(\d+)/);
-    const id = epIdMatch ? epIdMatch[1] : episodeId;
+    if (epIdMatch) {
+      id = epIdMatch[1];
+    } else if (!episodeId.match(/^\d+$/)) {
+      // If someone passed only anime slug without ep (e.g. "erased-1030"), resolve first episode
+      try {
+        const epsData = await this.getEpisodes(episodeId);
+        if (epsData.episodes && epsData.episodes.length > 0) {
+          const firstEp = epsData.episodes[0];
+          const firstMatch = firstEp.id.match(/ep=(\d+)/);
+          id = firstMatch ? firstMatch[1] : (firstEp.epId || firstEp.episodeId);
+        }
+      } catch {}
+    }
 
     const { data } = await this.client.get(
       `/api/theme/episode/servers?episodeId=${id}`,
@@ -642,27 +656,48 @@ export class HiAnimeScraper {
 
   /**
    * Helper to extract intro & outro skip intervals + subtitle tracks from Megaplay.
+   * Resolves the real internal file data-id from the player HTML to guarantee the exact correct anime episode.
    */
   async getMegaplaySources(streamIdOrUrl: string) {
     try {
-      let streamId = streamIdOrUrl;
-      const match = streamIdOrUrl.match(/\/stream\/s-\d+\/([^\/?#]+)/i);
-      if (match) {
-        streamId = match[1];
-      }
-      if (!streamId) return null;
+      const embedUrl = streamIdOrUrl.startsWith("http")
+        ? streamIdOrUrl
+        : `https://megaplay.buzz/stream/s-2/${streamIdOrUrl}/sub`;
 
-      const sParamMatch = streamIdOrUrl.match(/[?&]s=([a-z0-9_-]+)/i);
+      // 1. Fetch player page to extract the real internal file data-id
+      // (The URL route ID is data-realid, which differs from the internal data-id used by getSources)
+      let fileId = "";
+      try {
+        const pageRes = await axios.get(embedUrl, {
+          headers: {
+            "User-Agent": DEFAULT_HEADERS["User-Agent"],
+            Referer: `${BASE_URL}/`,
+          },
+          timeout: 8000,
+        });
+        const match =
+          pageRes.data.match(/id="megaplay-player"[^>]*data-id="([^"]+)"/i) ||
+          pageRes.data.match(/data-id="([^"]+)"/i);
+        if (match) {
+          fileId = match[1];
+        }
+      } catch {
+        // Fallback: extract ID from route if page fetch fails
+        const match = embedUrl.match(/\/stream\/s-\d+\/([^\/?#]+)/i);
+        if (match) fileId = match[1];
+      }
+
+      if (!fileId) return null;
+
+      const sParamMatch = embedUrl.match(/[?&]s=([a-z0-9_-]+)/i);
       const sQuery = sParamMatch ? `&s=${encodeURIComponent(sParamMatch[1])}` : "";
 
       const { data } = await axios.get(
-        `https://megaplay.buzz/stream/getSources?id=${streamId}${sQuery}`,
+        `https://megaplay.buzz/stream/getSources?id=${fileId}${sQuery}`,
         {
           headers: {
             "User-Agent": DEFAULT_HEADERS["User-Agent"],
-            Referer: streamIdOrUrl.includes("http")
-              ? streamIdOrUrl
-              : `https://megaplay.buzz/stream/s-2/${streamId}/sub`,
+            Referer: embedUrl,
             "X-Requested-With": "XMLHttpRequest",
           },
           timeout: 10000,
