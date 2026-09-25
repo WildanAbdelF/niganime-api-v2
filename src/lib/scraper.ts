@@ -1,7 +1,38 @@
 import axios, { AxiosInstance } from "axios";
 import * as cheerio from "cheerio";
+import crypto from "crypto";
 
 const BASE_URL = "https://hianime.at";
+
+/** Utility: decrypt MegaPlay encrypted stream payload */
+export function decryptMegaplayCipher(cipherText: string): any {
+  try {
+    const keyStr = "i?LMTAx0Q6,:}50U";
+    const ivStr = "W0;27ToaUpl_P%'c";
+
+    const key = Buffer.alloc(32);
+    Buffer.from(keyStr, "utf8").copy(key, 0, 0, Math.min(32, keyStr.length));
+
+    const iv = Buffer.alloc(16);
+    Buffer.from(ivStr, "utf8").copy(iv, 0, 0, Math.min(16, ivStr.length));
+
+    let base64 = cipherText.replace(/-/g, "+").replace(/_/g, "/");
+    const mod = base64.length % 4;
+    if (mod) {
+      base64 += "====".slice(mod);
+    }
+    const encryptedBuf = Buffer.from(base64, "base64");
+
+    const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
+    const decrypted = Buffer.concat([
+      decipher.update(encryptedBuf),
+      decipher.final(),
+    ]);
+    return JSON.parse(decrypted.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
 
 const DEFAULT_HEADERS = {
   "User-Agent":
@@ -664,10 +695,34 @@ export class HiAnimeScraper {
           }))
         : [];
 
+      // Extract and decrypt M3U8 streaming sources
+      let m3u8Url: string | null = null;
+      if (data?.enc) {
+        const decrypted = decryptMegaplayCipher(data.enc);
+        if (decrypted) {
+          if (typeof decrypted === "string" && decrypted.includes(".m3u8")) {
+            m3u8Url = decrypted;
+          } else if (typeof decrypted.file === "string") {
+            m3u8Url = decrypted.file;
+          } else if (Array.isArray(decrypted) && decrypted[0]?.file) {
+            m3u8Url = decrypted[0].file;
+          } else if (Array.isArray(decrypted.sources) && decrypted.sources[0]?.file) {
+            m3u8Url = decrypted.sources[0].file;
+          }
+        }
+      } else if (data?.sources) {
+        if (typeof data.sources === "string") {
+          m3u8Url = data.sources;
+        } else if (Array.isArray(data.sources) && data.sources[0]?.file) {
+          m3u8Url = data.sources[0].file;
+        }
+      }
+
       return {
         intro: parseInterval(data?.intro),
         outro: parseInterval(data?.outro),
         tracks,
+        m3u8Url,
       };
     } catch {
       return null;
@@ -713,7 +768,7 @@ export class HiAnimeScraper {
 
     const embedUrl = selected?.url || "";
 
-    // Locate Megaplay stream URL for dynamic skip timestamps and subtitle tracks
+    // Locate Megaplay stream URL for dynamic skip timestamps, subtitle tracks, and m3u8 decryption
     let megaplayUrl = embedUrl.includes("megaplay.buzz") ? embedUrl : "";
     if (!megaplayUrl) {
       const megaServer =
@@ -726,6 +781,7 @@ export class HiAnimeScraper {
     let intro: SkipInterval = { start: 0, end: 0 };
     let outro: SkipInterval = { start: 0, end: 0 };
     let tracks: SubtitleTrack[] = [];
+    let rawM3u8Url: string | null = null;
 
     if (megaplayUrl) {
       const megaData = await this.getMegaplaySources(megaplayUrl);
@@ -733,20 +789,53 @@ export class HiAnimeScraper {
         intro = megaData.intro;
         outro = megaData.outro;
         tracks = megaData.tracks;
+        rawM3u8Url = megaData.m3u8Url;
       }
     }
+
+    const sources: Array<{
+      url: string;
+      type: string;
+      isM3U8: boolean;
+      quality?: string;
+    }> = [];
+
+    if (rawM3u8Url) {
+      // Proxied clean m3u8 stream URL that plays directly in HTML5 / Hls.js / Plyr without ads or iframe
+      sources.push({
+        url: `/api/proxy/m3u8?url=${encodeURIComponent(rawM3u8Url)}`,
+        type: "hls",
+        isM3U8: true,
+        quality: "auto",
+      });
+    }
+
+    const directSource = rawM3u8Url
+      ? {
+          url: rawM3u8Url,
+          type: "hls",
+          isM3U8: true,
+          headers: {
+            Referer: "https://megaplay.buzz/",
+          },
+        }
+      : null;
 
     return {
       headers: {
         Referer: "https://megaplay.buzz/",
       },
-      sources: [
-        {
-          url: embedUrl,
-          type: "iframe",
-          isM3U8: false,
-        },
-      ],
+      sources:
+        sources.length > 0
+          ? sources
+          : [
+              {
+                url: embedUrl,
+                type: "iframe",
+                isM3U8: false,
+              },
+            ],
+      directSource,
       embedUrl,
       intro,
       outro,
